@@ -1,85 +1,194 @@
-# FilmLog — GDGoC Backend Recruitment Task Starter Pack
+# Movie Watchlist API (FilmLog Backend)
 
-Selamat datang di repositori penugasan backend **FilmLog (Movie Watchlist & Review Platform)**. Repositori ini menyediakan:
-1. **Initial Seed Database** (`data/movies.json` dan `data/seed.sql`) berisi 20 film kurasi awal dengan atribut lengkap.
-2. **Frontend Companion** (`frontend/`) bertema Letterboxd yang siap pakai untuk menguji endpoint backend Anda secara visual dan interaktif.
+REST API sederhana untuk aplikasi pelacak film bergaya Letterboxd/IMDb. Dibuat untuk seleksi tahap 2 GDGoC UGM (Hacker, Backend).
 
----
+Fitur: akun pengguna (register/login), katalog 20 film, watchlist, riwayat tontonan + rating + review, dan rekomendasi film memakai Gemini AI yang hanya memilih dari film di database lokal.
 
-## 🎯 Objektif Penugasan
-Rancang dan bangun layanan **RESTful API** untuk aplikasi pelacak film (*movie watchlist*) yang mendukung alur autentikasi, kurasi film, pencatatan tontonan dan ulasan, serta integrasi **Google Gemini LLM** untuk rekomendasi film berbasis data lokal.
+## Teknologi
 
-Bebas menggunakan bahasa pemrograman dan framework apa pun (Node.js/Express/NestJS, Go/Gin/Fiber, Python/FastAPI/Django, PHP/Laravel, Java/Spring Boot, dll.) serta database relasional (PostgreSQL, MySQL, SQLite) atau NoSQL.
+- Python 3.14, FastAPI
+- SQLite + SQLAlchemy (ORM)
+- bcrypt (hash password), PyJWT (JWT)
+- Google Gemini API (`google-genai`)
+- Swagger UI bawaan FastAPI untuk uji API
 
----
-
-## 📁 Struktur Repositori Starter
+## Struktur Folder
 
 ```text
-movie-watchlist-starter/
-├── data/
-│   ├── movies.json     # Data 20 film awal (format JSON) untuk database seeder
-│   └── seed.sql        # Skrip SQL INSERT kompatibel dengan PostgreSQL & MySQL
-├── frontend/
-│   ├── index.html      # Frontend Letterboxd-style SPA (Zero-build Tailwind)
-│   ├── app.js          # Client logic & API caller
-│   └── README.md       # Panduan menjalankan frontend
-└── README.md           # Panduan penugasan & spesifikasi API
+.
+├── app/
+│   ├── main.py          # aplikasi FastAPI, CORS, format error, seeding saat start
+│   ├── config.py        # baca .env
+│   ├── database.py      # koneksi SQLite
+│   ├── models.py        # 4 tabel database
+│   ├── schemas.py       # validasi request/response
+│   ├── security.py      # hash password, JWT, cek user login
+│   ├── seed.py          # isi 20 film dari data/movies.json
+│   └── routers/
+│       ├── auth.py      # register, login
+│       ├── movies.py    # daftar & detail film
+│       ├── watchlist.py # watchlist (terproteksi)
+│       ├── watched.py   # watched + review (terproteksi)
+│       └── recommend.py # rekomendasi Gemini
+├── data/                # movies.json (20 film) dan seed.sql dari starter pack
+├── frontend/            # frontend starter pack (tidak diubah)
+├── .env.example
+├── requirements.txt
+└── README.md
 ```
 
----
+## Database (ERD)
 
-## 📑 Spesifikasi Kontrak API (API Contract)
+```mermaid
+erDiagram
+    USERS ||--o{ WATCHLISTS : punya
+    USERS ||--o{ REVIEWS : menulis
+    MOVIES ||--o{ WATCHLISTS : masuk
+    MOVIES ||--o{ REVIEWS : diulas
+    USERS { int id PK
+            string username
+            string email
+            string password_hash }
+    MOVIES { int id PK
+             string title
+             int year
+             string director
+             json genres
+             float rating
+             string duration
+             text synopsis
+             text poster_url
+             json cast }
+    WATCHLISTS { int id PK
+                 int user_id FK
+                 int movie_id FK
+                 datetime created_at }
+    REVIEWS { int id PK
+              int user_id FK
+              int movie_id FK
+              int rating
+              text review
+              datetime created_at }
+```
 
-Agar sistem dapat terhubung secara lancar dengan frontend companion yang disediakan, pastikan API Anda mematuhi spesifikasi antarmuka (API Contract) berikut:
+- Satu user bisa punya banyak baris watchlist dan banyak review.
+- Satu film bisa muncul di watchlist dan review banyak user.
+- `watchlists` dan `reviews` adalah tabel penghubung user dan film.
+- Pasangan `(user_id, movie_id)` unik di kedua tabel: tidak ada data ganda.
 
-### 1. Autentikasi
-* `POST /api/auth/register`
-  * **Body:** `{ "username": "string", "email": "string", "password": "string" }`
-  * **Response:** Status `201 Created`
-* `POST /api/auth/login`
-  * **Body:** `{ "email": "string", "password": "string" }`
-  * **Response:** Status `200 OK`, JSON berisi `{ "token": "JWT_STRING", "user": { ... } }`
+## Cara Memasang
 
-### 2. Movies
-* `GET /api/movies`
-  * **Query Params (Opsional):** `?genre=Sci-Fi&search=Inception`
-  * **Response:** Status `200 OK`, array daftar film dari database.
-* `GET /api/movies/:id`
-  * **Response:** Status `200 OK`, detail lengkap satu film.
+Butuh Python 3.14 (versi lain yang cukup baru biasanya juga bisa).
 
-### 3. Watchlist (Protected - Membutuhkan `Authorization: Bearer <token>`)
-* `GET /api/watchlist`
-  * **Response:** Status `200 OK`, daftar film di watchlist user yang sedang login.
-* `POST /api/watchlist`
-  * **Body:** `{ "movieId": 1 }`
-  * **Response:** Status `201 Created`
-* `DELETE /api/watchlist/:movieId`
-  * **Response:** Status `200 OK` (atau `204 No Content`)
+```bash
+python -m venv .venv
 
-### 4. Watched & Review (Protected - Membutuhkan `Authorization: Bearer <token>`)
-* `GET /api/watched`
-  * **Response:** Status `200 OK`, riwayat film yang sudah ditonton oleh user beserta ulasan dan ratingnya.
-* `POST /api/watched`
-  * **Body:** `{ "movieId": 1, "rating": 5, "review": "Filmnya luar biasa..." }`
-  * **Response:** Status `201 Created`.
+# aktifkan virtual environment
+#   Windows PowerShell : .venv\Scripts\Activate.ps1
+#   Windows CMD        : .venv\Scripts\activate.bat
+#   macOS / Linux      : source .venv/bin/activate
 
-### 5. AI Recommendation (Gemini API Integration ⭐)
-* `POST /api/movies/recommend`
-  * **Body:** `{ "prompt": "Saya mau film misteri dengan alur lambat dan atmosfer mendalam" }`
-  * **Aturan Khusus:** Film yang direkomendasikan **harus berasal dari 20 film di database awal**.
-  * **Response:** Status `200 OK` dengan JSON terstruktur:
-    ```json
-    {
-      "movie_id": 14,
-      "reasoning": "Memento sangat cocok dengan preferensi misteri Anda karena..."
-    }
-    ```
+pip install -r requirements.txt
+```
 
----
+## Mengatur `.env`
 
-## 💡 Prinsip Backend yang Dinilai
-1. **Database Modeling:** Relasi yang rapi antar tabel (`users`, `movies`, `watchlists`, `reviews`).
-2. **Access Control & Security:** Password di-hash (bcrypt/argon2), rute privat terlindungi token JWT, user tidak dapat memodifikasi data user lain.
-3. **Data Integrity & Robustness:** Validasi input request, penanganan error yang baik, dan penggunaan status code HTTP yang semantik.
-4. **Structured LLM Prompting:** Kemampuan mengarahkan Gemini untuk memilih dari subset data lokal dan mengembalikan JSON terstruktur.
+1. Salin `.env.example` menjadi `.env`.
+2. Isi `SECRET_KEY` dengan string acak:
+   ```bash
+   python -c "import secrets; print(secrets.token_hex(32))"
+   ```
+3. Isi `GEMINI_API_KEY` dengan API key dari https://aistudio.google.com/apikey
+4. `GEMINI_MODEL` bisa diganti jika model default tidak tersedia untuk akunmu.
+
+File `.env` tidak ikut ke GitHub (sudah ada di `.gitignore`).
+
+## Menjalankan Backend
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Server jalan di http://127.0.0.1:8000. Swagger UI: http://127.0.0.1:8000/docs
+
+## Database Seeding
+
+Seeding berjalan otomatis setiap server start. Film dicek lewat `id`, jadi tidak pernah terduplikasi. Untuk menjalankan manual:
+
+```bash
+python -m app.seed
+```
+
+## Menjalankan Frontend (opsional)
+
+```bash
+cd frontend
+python -m http.server 3000
+```
+
+Buka http://localhost:3000. Frontend memakai API di `http://localhost:8000/api` secara default.
+
+## Daftar Endpoint
+
+| Method | Endpoint | Fungsi | Login? |
+|---|---|---|---|
+| POST | `/api/auth/register` | Buat akun baru | Tidak |
+| POST | `/api/auth/login` | Login, dapat JWT | Tidak |
+| GET | `/api/movies` | Daftar film. Query: `search`, `genre` | Tidak |
+| GET | `/api/movies/{id}` | Detail film (404 jika tidak ada) | Tidak |
+| POST | `/api/movies/recommend` | Rekomendasi film dari Gemini | Tidak |
+| GET | `/api/watchlist` | Watchlist user | Ya |
+| POST | `/api/watchlist` | Tambah film ke watchlist | Ya |
+| DELETE | `/api/watchlist/{movieId}` | Hapus film dari watchlist | Ya |
+| GET | `/api/watched` | Riwayat tontonan + rating + review | Ya |
+| POST | `/api/watched` | Tambah film ditonton + rating + review | Ya |
+
+Endpoint terproteksi butuh header `Authorization: Bearer <token>`.
+
+Status code: 200 OK, 201 Created, 400 input tidak valid, 401 belum login/token salah, 404 tidak ditemukan, 409 data sudah ada, 502/503 masalah Gemini.
+Semua error berbentuk `{"message": "..."}`.
+
+Aturan validasi: username 3-50 karakter, email valid, password 8-72 karakter, rating 1-5, review maksimal 2000 karakter (boleh kosong).
+
+## Contoh Penggunaan API
+
+Contoh memakai `curl` (macOS/Linux/Git Bash). Di Windows PowerShell, lebih mudah pakai Swagger UI.
+
+```bash
+# Register
+curl -X POST http://localhost:8000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"hebron","email":"hebron@example.com","password":"rahasia123"}'
+
+# Login (salin nilai "token" dari response)
+curl -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"hebron@example.com","password":"rahasia123"}'
+
+# Film Sci-Fi yang judul/sutradaranya mengandung "inception"
+curl "http://localhost:8000/api/movies?genre=Sci-Fi&search=inception"
+
+# Tambah ke watchlist
+curl -X POST http://localhost:8000/api/watchlist \
+  -H "Authorization: Bearer TOKEN_KAMU" -H "Content-Type: application/json" \
+  -d '{"movieId":1}'
+
+# Tandai sudah ditonton
+curl -X POST http://localhost:8000/api/watched \
+  -H "Authorization: Bearer TOKEN_KAMU" -H "Content-Type: application/json" \
+  -d '{"movieId":1,"rating":5,"review":"Filmnya luar biasa"}'
+
+# Rekomendasi Gemini
+curl -X POST http://localhost:8000/api/movies/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Saya ingin film fiksi ilmiah dengan cerita menarik"}'
+# {"movie_id": 4, "reasoning": "..."}
+```
+
+Panduan pengujian lengkap dan panduan GitHub ada di `PANDUAN.md`.
+
+## Catatan Desain
+
+- Rekomendasi Gemini: seluruh film dikirim sebagai konteks, Gemini diminta membalas JSON `{movie_id, reasoning}`. Backend mengecek bahwa `movie_id` ada di database. Jika tidak valid, backend mencoba sekali lagi lalu membalas 502.
+- `GET /api/watchlist` mengembalikan objek film langsung. `GET /api/watched` mengembalikan `id, movie_id, rating, review, created_at, movie`.
+- Satu user hanya bisa punya satu review per film (duplikat dibalas 409).
